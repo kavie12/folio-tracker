@@ -1,6 +1,6 @@
 # Folio Tracker
 
-A Firefox extension that logs what you watch to your [Folio](../README.md) history automatically.
+A Firefox extension that logs what you watch to your [Folio](https://github.com/kavie12/folio) history automatically.
 
 Open a movie or episode on a supported site and Folio Tracker recognises it, shows it in the toolbar popup, and adds it to your history at 80% played (or when you press **Mark as watched**). For TV shows it records the season and episode as your progress.
 

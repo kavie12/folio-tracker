@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Folio">
+  <defs>
+    <linearGradient id="tile" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3D332C"/>
+      <stop offset="1" stop-color="#171311"/>
+    </linearGradient>
+    <linearGradient id="page" x1="18" y1="11" x2="46" y2="53" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F6D08F"/>
+      <stop offset="1" stop-color="#D9923B"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#tile)"/>
+  <rect x=".75" y=".75" width="62.5" height="62.5" rx="14.25" fill="none" stroke="#E3A857" stroke-opacity=".3" stroke-width="1.5"/>
+  <rect x="18" y="11" width="28" height="42" rx="4" transform="rotate(17 32 32)" fill="#E3A857" fill-opacity=".22"/>
+  <rect x="18" y="11" width="28" height="42" rx="4" transform="rotate(8.5 32 32)" fill="#E3A857" fill-opacity=".45"/>
+  <path d="M22 11H37L46 20V49A4 4 0 0 1 42 53H22A4 4 0 0 1 18 49V15A4 4 0 0 1 22 11Z" fill="url(#page)"/>
+  <path d="M37 11V20H46Z" fill="#9A5E1B"/>
+  <path d="M25 24H39V28.5H30V33H37V37.5H30V44H25Z" fill="#1B1613"/>
+  <circle cx="46" cy="46" r="8" fill="#1B1613"/>
+  <circle cx="46" cy="46" r="5.75" fill="#E3A857"/>
+  <path d="M43.1 46.2L45.2 48.3L49 43.9" fill="none" stroke="#1B1613" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

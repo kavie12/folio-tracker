@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values: the build only inlines them, nothing is contacted.
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_ANON_KEY: ci
+      TMDB_PROXY_URL: https://proxy.example.workers.dev
+      FOLIO_APP_URL: https://folio.example
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run lint

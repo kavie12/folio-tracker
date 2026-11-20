@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Folio Tracker",
+  "version": "0.0.0",
+  "description": "Automatically log what you watch on supported streaming sites to your Folio history.",
+  "icons": { "48": "icons/icon-48.png", "96": "icons/icon-96.png", "128": "icons/icon-128.png" },
+  "action": {
+    "default_title": "Folio",
+    "default_popup": "popup.html",
+    "default_icon": { "48": "icons/icon-48.png", "96": "icons/icon-96.png" }
+  },
+  "background": { "scripts": ["background.js"] },
+  "permissions": ["storage", "notifications"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "folio-tracker@example.com",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": { "required": ["authenticationInfo", "browsingActivity"] }
+    }
+  }
+}

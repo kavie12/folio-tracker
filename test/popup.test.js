@@ -15,35 +15,41 @@ const SITES = [
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 /** Opens the popup against a fake background that answers GET_STATE with `state`. */
-async function open(state, tabUrl = 'https://cinejoy.pk/watch/tv/1622/8/4') {
+async function open(state, tabUrl = 'https://cinejoy.pk/watch/tv/1622/8/4', continueItems = []) {
   const dom = new JSDOM('<!doctype html><body><div id="app"></div></body>');
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
   dom.window.close = () => {};
 
   const sent = [];
+  const opened = [];
   globalThis.browser = {
     runtime: {
       getURL: (p) => `moz-extension://x/${p}`,
-      sendMessage: async (m) => { sent.push(m); return m.type === MSG.GET_STATE ? state : { ok: true }; },
+      sendMessage: async (m) => {
+        sent.push(m);
+        if (m.type === MSG.GET_STATE) return state;
+        if (m.type === MSG.LIST_CONTINUE) return { ok: true, items: continueItems };
+        return { ok: true };
+      },
     },
-    tabs: { query: async () => [{ id: 7, url: tabUrl }], create: async () => {} },
+    tabs: { query: async () => [{ id: 7, url: tabUrl }], create: async (opts) => { opened.push(opts.url); } },
   };
   globalThis.fetch = async () => new Response(JSON.stringify(SITES));
 
   mock.timers.enable({ apis: ['setInterval'] });
   await import(`../src/popup/popup.js?${Math.random()}`);
   await settle();
-  return { dom, doc: dom.window.document, sent };
+  return { dom, doc: dom.window.document, sent, opened };
 }
 
-const settings = { autoMark: true, notify: true };
+const settings = { autoMark: true, notify: true, saveContinue: true };
 const tvState = (extra = {}) => ({
   signedIn: true, user: { id: 'u', email: 'me@example.com' }, settings,
   media: { mediaType: 'tv', tmdbId: 1622, season: 8, episode: 4 },
   meta: { title: 'Supernatural', posterPath: '/p.jpg', releaseYear: 2005 },
   entry: { watched: false, progress: null },
   video: { percent: 42, ratio: 0.42, paused: false, ended: false, playing: true },
-  done: false, autoMarked: false, undoable: false, undone: false, lastError: null, ...extra,
+  done: false, autoMarked: false, undoable: false, undone: false, continued: false, lastError: null, ...extra,
 });
 
 test('signed out: shows the sign-in form and the supported sites', async (t) => {
@@ -120,4 +126,60 @@ test('after an undo the popup explains that auto-marking is paused for this titl
   const { doc } = await open(tvState({ undone: true }));
   assert.match(doc.body.textContent, /won’t be marked automatically again/);
   assert.equal(doc.querySelector('.btn-primary').textContent, 'Mark as watched');
+});
+
+const item = (extra = {}) => ({
+  mediaId: 1622, title: 'Supernatural', posterPath: '/p.jpg', releaseYear: 2005,
+  season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5', updatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(), ...extra,
+});
+const tab = (doc, name) => [...doc.querySelectorAll('.seg button')].find((b) => b.textContent === name);
+
+test('Continue tab lists saved episodes and opens the saved link', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc, sent, opened } = await open(tvState(), undefined, [item()]);
+  tab(doc, 'Continue').click();
+  await settle();
+
+  assert.ok(sent.some((m) => m.type === MSG.LIST_CONTINUE));
+  const row = doc.querySelector('.cont');
+  assert.match(row.textContent, /Supernatural/);
+  assert.equal(row.querySelector('.pill').textContent, 'S8E5');
+  assert.match(row.textContent, /cinejoy\.pk, saved/);
+
+  row.querySelector('.btn-primary').click();
+  assert.deepEqual(opened, ['https://cinejoy.pk/watch/tv/1622/8/5']);
+});
+
+test('Continue tab never opens a non-http link', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc, opened } = await open(tvState(), undefined, [item({ url: 'javascript:alert(1)' })]);
+  tab(doc, 'Continue').click();
+  await settle();
+  assert.equal(doc.querySelector('.cont .btn-primary'), null);
+  assert.equal(opened.length, 0);
+});
+
+test('removing a Continue entry asks the background and updates the list', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc, sent } = await open(tvState(), undefined, [item()]);
+  tab(doc, 'Continue').click();
+  await settle();
+  doc.querySelector('.cont .iconbtn').click();
+  await settle();
+  assert.ok(sent.some((m) => m.type === MSG.REMOVE_CONTINUE && m.mediaId === 1622));
+  assert.match(doc.querySelector('.empty').textContent, /Nothing to continue yet/);
+});
+
+test('empty Continue tab explains how entries appear', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc } = await open(tvState());
+  tab(doc, 'Continue').click();
+  await settle();
+  assert.match(doc.querySelector('.empty').textContent, /open the next one/);
+});
+
+test('the current page says when it was saved to Continue', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc } = await open(tvState({ continued: true }));
+  assert.match(doc.body.textContent, /Saved to Continue/);
 });

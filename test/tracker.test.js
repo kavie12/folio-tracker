@@ -44,6 +44,7 @@ test('top frame announces the media found by the site module', async (t) => {
   assert.deepEqual(media[0].ref, { mediaType: 'tv', tmdbId: 1622, season: 8, episode: 3 });
   assert.equal(media[0].site, 'cinejoy');
   assert.equal(media[0].host, 'cinejoy.pk');
+  assert.equal(media[0].url, 'https://cinejoy.pk/watch/tv/1622/8/3'); // saved with Continue entries
 });
 
 test('re-announces on a heartbeat, and again when the page title changes', async (t) => {

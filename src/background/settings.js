@@ -1,4 +1,4 @@
-const DEFAULTS = { autoMark: true, notify: true };
+const DEFAULTS = { autoMark: true, notify: true, saveContinue: true };
 
 export async function getSettings() {
   const { settings } = await browser.storage.local.get('settings');

@@ -4,7 +4,8 @@ import { TMDB_PROXY_URL } from '../shared/config.js';
 export async function getDetails(ref) {
   const key = `meta:${ref.mediaType}:${ref.tmdbId}`;
   const cached = (await browser.storage.local.get(key))[key];
-  if (cached) return cached;
+  // Entries cached before episode counts existed are refetched once for TV.
+  if (cached && (ref.mediaType === 'movie' || cached.episodeCounts)) return cached;
 
   let res;
   try {
@@ -21,6 +22,12 @@ export async function getDetails(ref) {
     title: d.title || d.name || 'Untitled',
     posterPath: d.poster_path ?? null,
     releaseYear: Number.isNaN(year) ? null : year,
+    // season number -> episodes in it (specials, season 0, left out); lets us tell when a season has ended
+    ...(ref.mediaType === 'tv' && {
+      episodeCounts: Object.fromEntries(
+        (d.seasons ?? []).filter((x) => x.season_number >= 1 && x.episode_count > 0).map((x) => [x.season_number, x.episode_count]),
+      ),
+    }),
   };
   await browser.storage.local.set({ [key]: meta });
   return meta;

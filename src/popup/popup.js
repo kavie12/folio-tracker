@@ -19,15 +19,35 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+function timeAgo(iso) {
+  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+  for (const [unit, size] of [['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit);
+  }
+  return 'just now';
+}
+
+/** Only plain http(s) links are ever opened. */
+function safeHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── state ───────────────────────────────────────────────────
 const app = document.getElementById('app');
 let sites = [];
 let tab = null;
 let state = null; // last getState response
-let view = 'now'; // 'now' | 'sites' | 'settings'
+let view = 'now'; // 'now' | 'continue' | 'sites' | 'settings'
 let panel = null; // the element that changes between views
 let pollTimer = null;
 let actionError = null; // error from the last button press (mark or undo)
+let cont = { status: 'idle', items: [], error: null }; // the Continue list
 
 const hostOf = (url) => {
   try { return new URL(url).hostname; } catch { return ''; }
@@ -144,7 +164,7 @@ function NowPlaying() {
     );
   }
 
-  const { media, meta, entry, video, done, autoMarked, undoable, undone, lastError, settings } = s;
+  const { media, meta, entry, video, done, autoMarked, undoable, undone, continued, lastError, settings } = s;
   const label = progressLabel(media);
   const title = meta?.title ?? `TMDB #${media.tmdbId}`;
 
@@ -200,6 +220,7 @@ function NowPlaying() {
       ),
     ),
     button,
+    continued && el('p', { class: 'small muted', style: 'text-align:center' }, el('span', { class: 'accent' }, '✓ '), 'Saved to Continue'),
     actionError && el('p', { class: 'small danger', role: 'alert' }, actionError),
     !actionError && lastError && el('p', { class: 'small danger', role: 'alert' }, `${lastError} It will retry automatically.`),
     !done && undone && el('p', { class: 'small muted', style: 'text-align:center' },
@@ -207,6 +228,66 @@ function NowPlaying() {
     !done && !undone && el('p', { class: 'small muted', style: 'text-align:center' },
       settings.autoMark ? 'Marked automatically at 80%.' : 'Automatic marking is off (see Settings).'),
   );
+}
+
+async function loadContinue() {
+  cont = { ...cont, status: 'loading' };
+  if (view === 'continue') renderPanel();
+  const res = await send({ type: MSG.LIST_CONTINUE });
+  cont = res.ok ? { status: 'ready', items: res.items, error: null } : { status: 'error', items: [], error: res.error };
+  if (view === 'continue') renderPanel();
+}
+
+function ContinueRow(item) {
+  const href = safeHttpUrl(item.url);
+  const host = href ? new URL(href).hostname : '';
+  return el('li', { class: 'card cont' },
+    Poster({ posterPath: item.posterPath, title: item.title }),
+    el('div', { class: 'cont-body' },
+      el('h3', { class: 'title display' }, item.title),
+      el('span', { class: 'pill' }, `S${item.season}E${item.episode}`),
+      el('div', { class: 'small muted' }, `${host ? `${host}, ` : ''}saved ${timeAgo(item.updatedAt)}`),
+    ),
+    el('div', { class: 'cont-actions' },
+      href
+        ? el('button', { class: 'btn btn-primary btn-sm', onclick: () => openLink(href) }, 'Continue')
+        : el('span', { class: 'small muted' }, 'No link'),
+      el('button', {
+        class: 'iconbtn',
+        'aria-label': `Remove ${item.title} from Continue`,
+        title: 'Remove',
+        onclick: async () => {
+          cont = { ...cont, items: cont.items.filter((i) => i.mediaId !== item.mediaId) };
+          renderPanel();
+          const res = await send({ type: MSG.REMOVE_CONTINUE, mediaId: item.mediaId });
+          if (!res.ok) await loadContinue(); // it did not work: show the real list again
+        },
+      }, '×'),
+    ),
+  );
+}
+
+function ContinueView() {
+  if (cont.status === 'idle' || cont.status === 'loading') {
+    return el('ul', { class: 'list' }, [0, 1].map(() => el('li', { class: 'card cont' },
+      el('div', { class: 'poster skeleton', style: 'width:48px' }),
+      el('div', { class: 'cont-body' }, el('div', { class: 'skeleton', style: 'height:16px;width:70%' }), el('div', { class: 'skeleton', style: 'height:12px;width:40%' })),
+    )));
+  }
+  if (cont.status === 'error') {
+    return el('div', { class: 'empty' },
+      el('h2', { class: 'display' }, 'Couldn’t load Continue'),
+      el('p', { class: 'muted' }, cont.error),
+      el('button', { class: 'btn btn-ghost', style: 'width:auto;margin-top:12px', onclick: loadContinue }, 'Try again'),
+    );
+  }
+  if (!cont.items.length) {
+    return el('div', { class: 'empty' },
+      el('h2', { class: 'display' }, 'Nothing to continue yet'),
+      el('p', { class: 'muted' }, 'Finish an episode, then open the next one on a supported site. It’s saved here with a link back.'),
+    );
+  }
+  return el('ul', { class: 'list' }, cont.items.map(ContinueRow));
 }
 
 function Sites() {
@@ -231,6 +312,7 @@ function Settings() {
     el('div', { class: 'card', style: 'display:flex;flex-direction:column;gap:14px' },
       toggle('autoMark', 'Mark automatically', 'Add a title once 80% has played.'),
       toggle('notify', 'Notifications', 'Tell me when something is added.'),
+      toggle('saveContinue', 'Save to Continue', 'Remember the next episode when I open it.'),
     ),
     el('div', { class: 'card', style: 'display:flex;flex-direction:column;gap:10px' },
       el('div', {}, el('div', { class: 'small muted' }, 'Signed in as'), el('div', { style: 'font-weight:600;word-break:break-all' }, user.email)),
@@ -247,7 +329,7 @@ function Settings() {
 function renderPanel({ animate = true } = {}) {
   if (!panel) return;
   panel.toggleAttribute('data-still', !animate); // polling must not replay entrance animations
-  const content = view === 'sites' ? Sites() : view === 'settings' ? Settings() : NowPlaying();
+  const content = view === 'sites' ? Sites() : view === 'settings' ? Settings() : view === 'continue' ? ContinueView() : NowPlaying();
   panel.replaceChildren(content);
 }
 
@@ -266,9 +348,13 @@ function render() {
   app.replaceChildren(
     Header(),
     Segmented(
-      [{ id: 'now', label: 'Now playing' }, { id: 'sites', label: 'Sites' }, { id: 'settings', label: 'Settings' }],
+      [{ id: 'now', label: 'Playing' }, { id: 'continue', label: 'Continue' }, { id: 'sites', label: 'Sites' }, { id: 'settings', label: 'Settings' }],
       view,
-      (next) => { view = next; renderPanel(); },
+      (next) => {
+        view = next;
+        if (next === 'continue') loadContinue(); // always fresh: the next episode may have just been saved
+        renderPanel();
+      },
     ),
     panel,
   );

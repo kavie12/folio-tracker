@@ -7,7 +7,7 @@ import { isAhead } from '../shared/media.js';
 import { getAccessToken, getSession, NotSignedInError } from './auth.js';
 import { getDetails } from './tmdb.js';
 
-async function rest(path, { method = 'GET', body, prefer } = {}, retry = true) {
+export async function rest(path, { method = 'GET', body, prefer } = {}, retry = true) {
   const token = await getAccessToken();
   if (!token) throw new NotSignedInError();
 

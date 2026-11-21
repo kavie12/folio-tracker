@@ -1,6 +1,6 @@
 # Folio Tracker
 
-A Firefox extension that logs what you watch to your [Folio](https://github.com/kavie12/folio) history automatically.
+A Firefox extension that logs what you watch to your [Folio](../README.md) history automatically.
 
 Open a movie or episode on a supported site and Folio Tracker recognises it, shows it in the toolbar popup, and adds it to your history at 80% played (or when you press **Mark as watched**). For TV shows it records the season and episode as your progress.
 
@@ -16,10 +16,10 @@ Open a movie or episode on a supported site and Folio Tracker recognises it, sho
 
 ## Supported sites
 
-| Site    | Domain       | How the title is identified                                                   |
-| ------- | ------------ | ----------------------------------------------------------------------------- |
+| Site | Domain | How the title is identified |
+| --- | --- | --- |
 | Cinecat | `cinecat.eu` | TMDB id in the URL, season and episode from the page title (`Show - S8 - E4`) |
-| Cinejoy | `cinejoy.pk` | TMDB id, season and episode in the URL (`/watch/tv/1622/8/3`)                 |
+| Cinejoy | `cinejoy.pk` | TMDB id, season and episode in the URL (`/watch/tv/1622/8/3`) |
 
 The same list is shown in the extension's **Sites** tab.
 
@@ -85,7 +85,27 @@ Firefox may not give a new extension access to sites automatically. If nothing i
 3. At 80% it is added to your history and the icon badge shows ✓. You get a notification, and the popup offers **Undo**.
 4. **Mark as watched** records it immediately, or updates a show's progress to the open episode.
 
-### Undo
+### Continue
+
+Continue keeps one **next episode to watch** per show, with the link to open it.
+
+**How an episode gets saved.** When you open a TV episode, the extension looks at the progress recorded in Folio. If the page is the episode right after it, it is saved to Continue together with the page address:
+
+| Recorded progress | Opened | Saved? |
+| --- | --- | --- |
+| S8E4 | S8E5 | Yes |
+| S8E23 (last episode of season 8) | S9E1 | Yes |
+| S8E4 | S9E1 | No, season 8 still has episodes (season lengths come from TMDB) |
+| S8E4 | S8E7, S8E4 or S8E2 | No |
+| Show not in your history | anything | No |
+
+**How it leaves.** When your progress reaches that episode (marking it watched, here or on the website), it is removed from Continue automatically. Removing the show from your history removes it too. Both are handled by database triggers, so they work whichever app made the change.
+
+**Where you see it.** The **Continue** tab in the popup (open with the **Continue** button, or remove with ×) and the **Continue** page of the web app. The current episode also shows "Saved to Continue" in the popup.
+
+It is saved when the page opens, when you open the popup (this covers signing in after the page loaded), and after an undo. Turn it off with **Save to Continue** in Settings.
+
+## Undo
 
 - A title that was added is removed. A show whose progress moved goes back to its previous season and episode.
 - It is refused if later progress was recorded since (undoing S8E4 after S8E5 would lose S8E5).
@@ -94,10 +114,10 @@ Firefox may not give a new extension access to sites automatically. If nothing i
 
 ### Settings
 
-| Setting            | Default | Does                            |
-| ------------------ | ------- | ------------------------------- |
-| Mark automatically | On      | Add a title once 80% has played |
-| Notifications      | On      | Notify when something is added  |
+| Setting | Default | Does |
+| --- | --- | --- |
+| Mark automatically | On | Add a title once 80% has played |
+| Notifications | On | Notify when something is added |
 
 The 80% threshold and the 2-minute minimum video length are constants in `src/shared/media.js`.
 
@@ -114,26 +134,14 @@ One file per site in `src/sites/`. The build generates the content script, the m
 
 ```js
 // src/sites/example.js
-export const meta = {
-  id: "example",
-  name: "Example",
-  domains: ["example.com"],
-  frameDomains: [],
-};
+export const meta = { id: 'example', name: 'Example', domains: ['example.com'], frameDomains: [] };
 
 export function extract({ url }) {
-  const m = url.pathname.match(
-    /^\/watch\/(movie|tv)\/(\d+)(?:\/(\d+)\/(\d+))?/,
-  );
+  const m = url.pathname.match(/^\/watch\/(movie|tv)\/(\d+)(?:\/(\d+)\/(\d+))?/);
   if (!m) return null;
-  return m[1] === "movie"
-    ? { mediaType: "movie", tmdbId: Number(m[2]) }
-    : {
-        mediaType: "tv",
-        tmdbId: Number(m[2]),
-        season: Number(m[3]),
-        episode: Number(m[4]),
-      };
+  return m[1] === 'movie'
+    ? { mediaType: 'movie', tmdbId: Number(m[2]) }
+    : { mediaType: 'tv', tmdbId: Number(m[2]), season: Number(m[3]), episode: Number(m[4]) };
 }
 ```
 
@@ -156,10 +164,10 @@ The two default modules ship with `frameDomains: []` because those sites' player
 ```
  supported site tab                          background page                       Folio
 ┌──────────────────────┐   media (TMDB id)  ┌────────────────────────┐  REST     ┌──────────────┐
-│ top frame            │ ─────────────────▶│ one state object per   │ ────────▶│ Supabase     │
+│ top frame            │ ─────────────────▶ │ one state object per   │ ────────▶ │ Supabase     │
 │  site module extract │                    │ tab: what + how far    │           │ watch_history│
 ├──────────────────────┤   video progress   │ marks at 80%, undo     │  /details │              │
-│ any frame with video │ ─────────────────▶│ badge + notification   │ ────────▶│ Worker (TMDB)│
+│ any frame with video │ ─────────────────▶ │ badge + notification   │ ────────▶ │ Worker (TMDB)│
 └──────────────────────┘                    └───────────▲────────────┘           └──────────────┘
                                                         │ state / mark / undo / sign in
                                                   toolbar popup
@@ -175,26 +183,27 @@ The two default modules ship with `frameDomains: []` because those sites' player
 
 ## Scripts
 
-| Command           | Does                                                |
-| ----------------- | --------------------------------------------------- |
-| `npm run build`   | Build `dist/` from `src/` and `.env`                |
-| `npm run watch`   | Rebuild automatically when `src/` changes           |
-| `npm start`       | Build and run in a separate, clean Firefox profile  |
-| `npm run sign`    | Build and get a signed, private `.xpi` from Mozilla |
-| `npm run package` | Build and create an unsigned `artifacts/*.zip`      |
-| `npm test`        | Run the unit and DOM tests                          |
-| `npm run lint`    | Lint `dist/` with Mozilla's validator               |
+| Command | Does |
+| --- | --- |
+| `npm run build` | Build `dist/` from `src/` and `.env` |
+| `npm run watch` | Rebuild automatically when `src/` changes |
+| `npm start` | Build and run in a separate, clean Firefox profile |
+| `npm run sign` | Build and get a signed, private `.xpi` from Mozilla |
+| `npm run package` | Build and create an unsigned `artifacts/*.zip` |
+| `npm test` | Run the unit and DOM tests |
+| `npm run lint` | Lint `dist/` with Mozilla's validator |
 
 ## Folio backend
 
 The extension talks to the web app's backend directly and depends only on:
 
-| Dependency                                                                                                                       | Used for                                                 |
-| -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Dependency | Used for |
+| --- | --- |
 | `watch_history` columns `user_id, media_id, media_type, title, poster_path, release_year, last_season, last_episode, watched_at` | Reading and writing history (Row Level Security applies) |
-| Unique `(user_id, media_id, media_type)`                                                                                         | Idempotent inserts                                       |
-| Worker `GET /details/{movie\|tv}/{id}`                                                                                           | Title, poster and year                                   |
-| Worker accepts `moz-extension://` origins                                                                                        | Requests from the extension                              |
+| Unique `(user_id, media_id, media_type)` | Idempotent inserts |
+| `continue_watching` table (migration `005_continue_watching.sql`) with unique `(user_id, media_id)`, and the triggers that prune it | The Continue list |
+| Worker `GET /details/{movie\|tv}/{id}` | Title, poster and year |
+| Worker accepts `moz-extension://` origins | Requests from the extension |
 
 If you change one of these in the web app, change the extension in the same pull request.
 

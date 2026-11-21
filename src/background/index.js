@@ -5,11 +5,12 @@
  * and marks the title as watched at 80%.
  */
 import { MSG } from '../shared/messages.js';
-import { MIN_DURATION, WATCHED_THRESHOLD, isAhead, mediaKey, normalizeRef, progressLabel } from '../shared/media.js';
+import { MIN_DURATION, WATCHED_THRESHOLD, isAhead, mediaKey, normalizeRef, progressLabel, qualifiesForContinue } from '../shared/media.js';
 import { getUser, signIn, signOut } from './auth.js';
 import { fetchEntry, recordWatch, undoApplies, undoWatch } from './folio.js';
 import { getSettings, setSettings } from './settings.js';
 import { getDetails } from './tmdb.js';
+import { listContinue, removeContinue, saveContinue } from './continue.js';
 import { clearUndo, getUndo, saveUndo } from './undo.js';
 
 const STALE_MS = 90_000; // content scripts re-announce every few seconds
@@ -33,7 +34,7 @@ function persist() {
 }
 
 const blankTab = () => ({
-  site: null, host: null, media: null, mediaAt: 0,
+  site: null, host: null, url: null, media: null, mediaAt: 0, continueKey: null,
   videos: {}, entry: null,
   markedKey: null, markedAuto: false, undoneKey: null, marking: false, lastError: null, retryAt: 0,
 });
@@ -114,6 +115,44 @@ async function markNow(tabId, { manual }) {
   }
 }
 
+/** The page URL if it is plain http(s) on the host the content script runs on. */
+function safePageUrl(raw, host) {
+  try {
+    const url = new URL(String(raw));
+    return /^https?:$/.test(url.protocol) && url.hostname === host && url.href.length <= 2000 ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Opening the episode right after your recorded progress saves it to Continue, with the page link.
+ * Runs when the page changes, when the popup opens (covers signing in afterwards or an earlier failure),
+ * and after an undo.
+ */
+async function syncContinue(tabId, entry) {
+  const t = tabs.get(tabId);
+  if (!t?.media || t.media.mediaType !== 'tv' || !t.url) return;
+
+  const ref = t.media;
+  const key = mediaKey(ref);
+  if (t.continueKey === key) return; // already handled for this episode (even if the user removed it since)
+  if (!(await getSettings()).saveContinue) return;
+
+  const meta = await getDetails(ref).catch(() => null);
+  if (!meta || !qualifiesForContinue(ref, entry, meta.episodeCounts)) return;
+
+  try {
+    await saveContinue(ref, meta, t.url);
+  } catch {
+    return; // offline or signed out: tried again the next time the popup opens
+  }
+  if (tabs.get(tabId)?.media && mediaKey(tabs.get(tabId).media) === key) {
+    tabs.get(tabId).continueKey = key;
+    persist();
+  }
+}
+
 /** Reverses the last mark for the title open in this tab. */
 async function undoNow(tabId) {
   const t = tabs.get(tabId);
@@ -140,6 +179,10 @@ async function undoNow(tabId) {
     t.entry = await fetchEntry(ref).catch(() => null);
     setBadge(tabId);
     persist();
+    if (t.entry && tabs.get(tabId)?.media && mediaKey(tabs.get(tabId).media) === key) {
+      t.continueKey = null; // the database may have dropped it when this episode was marked
+      syncContinue(tabId, t.entry);
+    }
   }
 }
 
@@ -166,12 +209,13 @@ async function onMedia(msg, sender) {
 
   t.site = String(msg.site ?? '').slice(0, 40);
   t.host = String(msg.host ?? '').slice(0, 253);
+  t.url = safePageUrl(msg.url, t.host);
   t.media = ref;
   t.mediaAt = Date.now();
 
   if (before !== after) {
     // A different movie or episode: forget the previous one's playback.
-    Object.assign(t, { videos: {}, entry: null, markedKey: null, markedAuto: false, undoneKey: null, lastError: null, retryAt: 0 });
+    Object.assign(t, { videos: {}, entry: null, markedKey: null, markedAuto: false, undoneKey: null, continueKey: null, lastError: null, retryAt: 0 });
     if (ref) {
       getDetails(ref).catch(() => undefined); // warm the cache so the popup opens instantly
       fetchEntry(ref)
@@ -180,6 +224,7 @@ async function onMedia(msg, sender) {
             tabs.get(sender.tab.id).entry = entry;
             setBadge(sender.tab.id);
             persist();
+            syncContinue(sender.tab.id, entry);
           }
         })
         .catch(() => undefined); // signed out or offline: the badge just stays at the dot
@@ -218,14 +263,17 @@ async function snapshot(tabId) {
   const [meta, entry, undo] = await Promise.all([getDetails(ref).catch(() => null), fetchEntry(ref).catch(() => null), getUndo(ref)]);
   t.entry = entry;
   setBadge(tabId);
+  syncContinue(tabId, entry); // fire and forget: the next poll reports the result
 
+  const done = isDone(t, ref, entry);
   return {
     ...base,
     media: ref,
     meta,
     entry,
     video: summarizeVideo(t),
-    done: isDone(t, ref, entry),
+    done,
+    continued: t.continueKey === mediaKey(ref) && !done,
     autoMarked: t.markedKey === mediaKey(ref) && t.markedAuto,
     undoable: undoApplies(ref, entry, undo),
     undone: t.undoneKey === mediaKey(ref),
@@ -254,6 +302,19 @@ async function route(msg, sender) {
       return markNow(msg.tabId, { manual: true });
     case MSG.UNDO:
       return undoNow(msg.tabId);
+    case MSG.LIST_CONTINUE:
+      try {
+        return { ok: true, items: await listContinue() };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    case MSG.REMOVE_CONTINUE:
+      try {
+        await removeContinue(msg.mediaId);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
     case MSG.SIGN_IN:
       try {
         return { ok: true, user: await signIn(String(msg.email ?? ''), String(msg.password ?? '')) };

@@ -12,7 +12,7 @@ Object.assign(globalThis, {
 
 const store = {
   session: { accessToken: 'tok', refreshToken: 'ref', expiresAt: Math.floor(Date.now() / 1000) + 3600, user: { id: 'user-1', email: 'a@b.c' } },
-  'meta:tv:1622': { title: 'Supernatural', posterPath: '/p.jpg', releaseYear: 2005 },
+  'meta:tv:1622': { title: 'Supernatural', posterPath: '/p.jpg', releaseYear: 2005, episodeCounts: { 8: 23 } },
   'meta:movie:603': { title: 'The Matrix', posterPath: '/m.jpg', releaseYear: 1999 },
 };
 globalThis.browser = {

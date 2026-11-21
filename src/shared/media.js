@@ -44,3 +44,25 @@ export function isAhead(next, current) {
   if (next.season !== current.season) return next.season > current.season;
   return (next.episode ?? 0) > (current.episode ?? 0);
 }
+
+/**
+ * Is `candidate` the episode right after `progress`?  Same season and the next episode number, or
+ * episode 1 of the next season once the current season is finished. `episodeCounts` (season -> number
+ * of episodes, from TMDB) tells us when a season is finished; without it we accept S+1 E1.
+ */
+export function isNextEpisode(candidate, progress, episodeCounts) {
+  if (!progress || progress.season == null || progress.episode == null) return false;
+  if (candidate.season == null || candidate.episode == null) return false;
+
+  if (candidate.season === progress.season) return candidate.episode === progress.episode + 1;
+  if (candidate.season === progress.season + 1 && candidate.episode === 1) {
+    const count = episodeCounts?.[progress.season];
+    return count == null || progress.episode >= count;
+  }
+  return false;
+}
+
+/** Should opening `ref` put it in Continue? Only the episode right after recorded progress qualifies. */
+export function qualifiesForContinue(ref, entry, episodeCounts) {
+  return ref.mediaType === 'tv' && !!entry?.watched && isNextEpisode(ref, entry.progress, episodeCounts);
+}

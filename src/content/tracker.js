@@ -39,7 +39,7 @@ function watchMedia(site) {
       }
     }
     lastSent = now;
-    send({ type: MSG.MEDIA, site: site.meta.id, host: location.hostname, ref, pageTitle: document.title });
+    send({ type: MSG.MEDIA, site: site.meta.id, host: location.hostname, url: location.href, ref, pageTitle: document.title });
   };
 
   setInterval(tick, MEDIA_POLL_MS);

@@ -20,12 +20,13 @@ const store = (obj) => ({
   remove: async (k) => { delete obj[k]; },
 });
 let listener;
+const notifications = [];
 globalThis.browser = {
   runtime: { id: 'ext', getURL: (p) => p, onMessage: { addListener: (fn) => { listener = fn; } } },
   storage: { local: store(local), session: store(sessionStore) },
   action: { setBadgeText: async () => {}, setBadgeBackgroundColor: () => {}, setBadgeTextColor: () => {} },
   tabs: { onRemoved: { addListener() {} }, onUpdated: { addListener() {} } },
-  notifications: { create() {} },
+  notifications: { create: (id, opts) => { notifications.push({ id, ...opts }); } },
 };
 
 // ── a fake backend ──────────────────────────────────────────
@@ -65,6 +66,7 @@ async function open({ season, episode, url, host = 'cinejoy.pk', mediaType = 'tv
 const reset = (rows) => {
   history = rows;
   posts = [];
+  notifications.length = 0;
   delete local.settings;
 };
 const progress = (season, episode) => [{ last_season: season, last_episode: episode, watched_at: 't' }];
@@ -142,4 +144,33 @@ test('opening the popup saves it if the first attempt could not (for example, si
   await settle();
   assert.equal(posts.length, 1);
   assert.equal(state.signedIn, true);
+});
+
+test('a notification is shown when an episode is added to Continue', async () => {
+  reset(progress(8, 4));
+  await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].title, 'Saved to Continue');
+  assert.equal(notifications[0].message, 'Supernatural, S8E5');
+});
+
+test('no notification when nothing is saved, or when notifications are off', async () => {
+  reset(progress(8, 4));
+  await open({ season: 8, episode: 7, url: 'https://cinejoy.pk/watch/tv/1622/8/7' }); // not the next episode
+  assert.equal(notifications.length, 0);
+
+  local.settings = { notify: false };
+  await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  assert.equal(posts.length, 1); // still saved...
+  assert.equal(notifications.length, 0); // ...silently
+});
+
+test('re-announcing the same page does not notify again', async () => {
+  reset(progress(8, 4));
+  const tabId = await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  for (let i = 0; i < 3; i++) {
+    await listener({ type: 'media', site: 'cinejoy', host: 'cinejoy.pk', url: 'https://cinejoy.pk/watch/tv/1622/8/5', ref: { mediaType: 'tv', tmdbId: 1622, season: 8, episode: 5 } }, SENDER(tabId));
+  }
+  await settle();
+  assert.equal(notifications.length, 1);
 });

@@ -101,7 +101,7 @@ Continue keeps one **next episode to watch** per show, with the link to open it.
 
 **How it leaves.** When your progress reaches that episode (marking it watched, here or on the website), it is removed from Continue automatically. Removing the show from your history removes it too. Both are handled by database triggers, so they work whichever app made the change.
 
-**Where you see it.** The **Continue** tab in the popup (open with the **Continue** button, or remove with ×) and the **Continue** page of the web app. The current episode also shows "Saved to Continue" in the popup.
+**Where you see it.** The **Continue** tab in the popup (a **Continue** button opens the saved link) and the **Continue** page of the web app, where entries can also be removed. The current episode also shows "Saved to Continue" in the popup, and a notification appears when an episode is added.
 
 It is saved when the page opens, when you open the popup (this covers signing in after the page loaded), and after an undo. Turn it off with **Save to Continue** in Settings.
 

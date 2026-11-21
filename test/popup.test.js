@@ -146,6 +146,7 @@ test('Continue tab lists saved episodes and opens the saved link', async (t) => 
   assert.equal(row.querySelector('.pill').textContent, 'S8E5');
   assert.match(row.textContent, /cinejoy\.pk, saved/);
 
+  assert.equal(row.querySelector('[aria-label^="Remove"]'), null, 'the extension has no remove button');
   row.querySelector('.btn-primary').click();
   assert.deepEqual(opened, ['https://cinejoy.pk/watch/tv/1622/8/5']);
 });
@@ -157,17 +158,6 @@ test('Continue tab never opens a non-http link', async (t) => {
   await settle();
   assert.equal(doc.querySelector('.cont .btn-primary'), null);
   assert.equal(opened.length, 0);
-});
-
-test('removing a Continue entry asks the background and updates the list', async (t) => {
-  t.after(() => mock.timers.reset());
-  const { doc, sent } = await open(tvState(), undefined, [item()]);
-  tab(doc, 'Continue').click();
-  await settle();
-  doc.querySelector('.cont .iconbtn').click();
-  await settle();
-  assert.ok(sent.some((m) => m.type === MSG.REMOVE_CONTINUE && m.mediaId === 1622));
-  assert.match(doc.querySelector('.empty').textContent, /Nothing to continue yet/);
 });
 
 test('empty Continue tab explains how entries appear', async (t) => {

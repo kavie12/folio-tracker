@@ -10,7 +10,7 @@ import { getUser, signIn, signOut } from './auth.js';
 import { fetchEntry, recordWatch, undoApplies, undoWatch } from './folio.js';
 import { getSettings, setSettings } from './settings.js';
 import { getDetails } from './tmdb.js';
-import { listContinue, removeContinue, saveContinue } from './continue.js';
+import { listContinue, saveContinue } from './continue.js';
 import { clearUndo, getUndo, saveUndo } from './undo.js';
 
 const STALE_MS = 90_000; // content scripts re-announce every few seconds
@@ -86,6 +86,16 @@ async function notify(ref, result) {
   });
 }
 
+async function notifyContinue(ref, meta) {
+  if (!(await getSettings()).notify) return;
+  browser.notifications.create(`folio-continue-${mediaKey(ref)}`, {
+    type: 'basic',
+    iconUrl: browser.runtime.getURL('icons/icon-96.png'),
+    title: 'Saved to Continue',
+    message: `${meta.title}, ${progressLabel(ref)}`,
+  });
+}
+
 async function markNow(tabId, { manual }) {
   const t = tabs.get(tabId);
   if (!t?.media || t.marking) return { ok: false, error: 'Nothing to mark.' };
@@ -151,6 +161,7 @@ async function syncContinue(tabId, entry) {
     tabs.get(tabId).continueKey = key;
     persist();
   }
+  await notifyContinue(ref, meta); // once per episode: continueKey stops repeat saves
 }
 
 /** Reverses the last mark for the title open in this tab. */
@@ -305,13 +316,6 @@ async function route(msg, sender) {
     case MSG.LIST_CONTINUE:
       try {
         return { ok: true, items: await listContinue() };
-      } catch (err) {
-        return { ok: false, error: err.message };
-      }
-    case MSG.REMOVE_CONTINUE:
-      try {
-        await removeContinue(msg.mediaId);
-        return { ok: true };
       } catch (err) {
         return { ok: false, error: err.message };
       }

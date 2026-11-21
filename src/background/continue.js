@@ -39,9 +39,3 @@ export async function listContinue() {
     updatedAt: r.updated_at,
   }));
 }
-
-export async function removeContinue(mediaId) {
-  const id = Number(mediaId);
-  if (!Number.isInteger(id) || id < 1) throw new Error('Invalid title.');
-  await rest(`continue_watching?media_id=eq.${id}`, { method: 'DELETE', prefer: 'return=minimal' });
-}

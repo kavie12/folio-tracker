@@ -22,7 +22,7 @@ globalThis.browser = {
   },
 };
 
-const { saveContinue, listContinue, removeContinue } = await import('../src/background/continue.js');
+const { saveContinue, listContinue } = await import('../src/background/continue.js');
 const { getDetails } = await import('../src/background/tmdb.js');
 
 function fakeFetch(responder) {
@@ -65,17 +65,6 @@ test('listContinue maps rows, newest first', async () => {
     mediaId: 1622, title: 'Supernatural', posterPath: '/p.jpg', releaseYear: 2005,
     season: 8, episode: 5, url: 'https://x.test/a', updatedAt: '2026-01-02T00:00:00Z',
   });
-});
-
-test('removeContinue deletes by TMDB id and rejects junk ids', async () => {
-  const calls = fakeFetch(() => new Response(null, { status: 204 }));
-  await removeContinue(1622);
-  assert.equal(calls[0].method, 'DELETE');
-  assert.match(calls[0].url, /continue_watching\?media_id=eq\.1622$/);
-
-  await assert.rejects(removeContinue('1; drop table'), /Invalid title/);
-  await assert.rejects(removeContinue(-1), /Invalid title/);
-  assert.equal(calls.length, 1);
 });
 
 test('getDetails keeps episode counts per season (specials left out)', async () => {

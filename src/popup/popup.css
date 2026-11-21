@@ -103,8 +103,6 @@ label.field { display: block; font-weight: 500; font-size: 13px; }
 .cont-body .title { font-size: 14px; }
 .cont-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; flex: none; }
 .btn-sm { width: auto; padding: 6px 12px; font-size: 13px; }
-.iconbtn { width: 100%; padding: 2px 0; border: 0; border-radius: 6px; background: none; color: var(--mute); font-size: 18px; line-height: 1; transition: background-color .15s, color .15s; }
-.iconbtn:hover { background: var(--mist); color: var(--danger); }
 
 /* switch */
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

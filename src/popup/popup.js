@@ -252,17 +252,6 @@ function ContinueRow(item) {
       href
         ? el('button', { class: 'btn btn-primary btn-sm', onclick: () => openLink(href) }, 'Continue')
         : el('span', { class: 'small muted' }, 'No link'),
-      el('button', {
-        class: 'iconbtn',
-        'aria-label': `Remove ${item.title} from Continue`,
-        title: 'Remove',
-        onclick: async () => {
-          cont = { ...cont, items: cont.items.filter((i) => i.mediaId !== item.mediaId) };
-          renderPanel();
-          const res = await send({ type: MSG.REMOVE_CONTINUE, mediaId: item.mediaId });
-          if (!res.ok) await loadContinue(); // it did not work: show the real list again
-        },
-      }, '×'),
     ),
   );
 }

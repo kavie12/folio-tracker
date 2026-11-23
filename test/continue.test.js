@@ -22,7 +22,7 @@ globalThis.browser = {
   },
 };
 
-const { saveContinue, listContinue } = await import('../src/background/continue.js');
+const { getContinue, saveContinue, listContinue } = await import('../src/background/continue.js');
 const { getDetails } = await import('../src/background/tmdb.js');
 
 function fakeFetch(responder) {
@@ -53,6 +53,15 @@ test('saveContinue upserts one row per show, with the link', async () => {
   assert.equal(post.body.url, 'https://cinejoy.pk/watch/tv/1622/8/5');
   assert.equal(post.body.title, 'Supernatural');
   assert.ok(post.body.updated_at);
+});
+
+test('getContinue returns the saved episode for a show, or null', async () => {
+  let calls = fakeFetch(() => new Response(JSON.stringify([{ season: 8, episode: 5 }])));
+  assert.deepEqual(await getContinue(ref), { season: 8, episode: 5 });
+  assert.match(calls[0].url, /continue_watching\?media_id=eq\.1622&select=season,episode&limit=1/);
+
+  calls = fakeFetch(() => new Response(JSON.stringify([])));
+  assert.equal(await getContinue(ref), null);
 });
 
 test('listContinue maps rows, newest first', async () => {

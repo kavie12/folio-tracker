@@ -10,7 +10,7 @@ import { getUser, signIn, signOut } from './auth.js';
 import { fetchEntry, recordWatch, undoApplies, undoWatch } from './folio.js';
 import { getSettings, setSettings } from './settings.js';
 import { getDetails } from './tmdb.js';
-import { listContinue, saveContinue } from './continue.js';
+import { getContinue, listContinue, saveContinue } from './continue.js';
 import { clearUndo, getUndo, saveUndo } from './undo.js';
 
 const STALE_MS = 90_000; // content scripts re-announce every few seconds
@@ -145,23 +145,38 @@ async function syncContinue(tabId, entry) {
   if (!t?.media || t.media.mediaType !== 'tv' || !t.url) return;
 
   const ref = t.media;
+  const url = t.url; // the link of THIS episode, even if the tab moves on while we wait below
   const key = mediaKey(ref);
   if (t.continueKey === key) return; // already handled for this episode (even if the user removed it since)
   if (!(await getSettings()).saveContinue) return;
 
+  // Only shows tracked in the history (with recorded progress), and only the episode right after it.
   const meta = await getDetails(ref).catch(() => null);
   if (!meta || !qualifiesForContinue(ref, entry, meta.episodeCounts)) return;
 
+  // Is this episode already in the list? Ask the list itself: the tab's memory is lost when a tab is
+  // closed or the browser restarts, and the same episode may be opened again later.
+  let saved;
   try {
-    await saveContinue(ref, meta, t.url);
+    saved = await getContinue(ref);
   } catch {
     return; // offline or signed out: tried again the next time the popup opens
   }
+  const alreadySaved = saved?.season === ref.season && saved?.episode === ref.episode;
+
+  if (!alreadySaved) {
+    try {
+      await saveContinue(ref, meta, url);
+    } catch {
+      return;
+    }
+  }
+
   if (tabs.get(tabId)?.media && mediaKey(tabs.get(tabId).media) === key) {
     tabs.get(tabId).continueKey = key;
     persist();
   }
-  await notifyContinue(ref, meta); // once per episode: continueKey stops repeat saves
+  if (!alreadySaved) await notifyContinue(ref, meta); // nothing was added, so nothing to announce otherwise
 }
 
 /** Reverses the last mark for the title open in this tab. */

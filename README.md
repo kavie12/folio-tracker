@@ -97,9 +97,14 @@ Continue keeps one **next episode to watch** per show, with the link to open it.
 | S8E23 (last episode of season 8) | S9E1 | Yes |
 | S8E4 | S9E1 | No, season 8 still has episodes (season lengths come from TMDB) |
 | S8E4 | S8E7, S8E4 or S8E2 | No |
+| Show in your history, but no season and episode recorded | anything | No |
 | Show not in your history | anything | No |
 
-**How it leaves.** When your progress reaches that episode (marking it watched, here or on the website), it is removed from Continue automatically. Removing the show from your history removes it too. Both are handled by database triggers, so they work whichever app made the change.
+**Only tracked shows.** A show goes to Continue only if it is in your history **with a season and episode recorded**. The database enforces this too, so no app can add anything else.
+
+**No duplicates.** Before saving, the extension checks the Continue list itself. If that episode is already there (for example you opened it in another tab, or after restarting Firefox), nothing is written and no notification is shown. A different episode of the same show replaces the old one and does notify.
+
+**How it leaves.** When your progress reaches that episode (marking it watched, here or on the website), it is removed from Continue automatically. Clearing a show's progress or removing the show from your history removes it too. Both are handled by database triggers, so they work whichever app made the change.
 
 **Where you see it.** The **Continue** tab in the popup (a **Continue** button opens the saved link) and the **Continue** page of the web app, where entries can also be removed. The current episode also shows "Saved to Continue" in the popup, and a notification appears when an episode is added.
 
@@ -201,7 +206,7 @@ The extension talks to the web app's backend directly and depends only on:
 | --- | --- |
 | `watch_history` columns `user_id, media_id, media_type, title, poster_path, release_year, last_season, last_episode, watched_at` | Reading and writing history (Row Level Security applies) |
 | Unique `(user_id, media_id, media_type)` | Idempotent inserts |
-| `continue_watching` table (migration `005_continue_watching.sql`) with unique `(user_id, media_id)`, and the triggers that prune it | The Continue list |
+| `continue_watching` table (migrations `005_continue_watching.sql` and `006_continue_requires_history.sql`) with unique `(user_id, media_id)`, and the triggers that guard and prune it | The Continue list |
 | Worker `GET /details/{movie\|tv}/{id}` | Title, poster and year |
 | Worker accepts `moz-extension://` origins | Requests from the extension |
 

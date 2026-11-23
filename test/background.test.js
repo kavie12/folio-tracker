@@ -32,6 +32,8 @@ globalThis.browser = {
 // ── a fake backend ──────────────────────────────────────────
 let history; // rows returned for watch_history
 let posts; // writes to continue_watching
+let continueRows; // what is already in the Continue list
+let gate = null; // when set, the Continue lookup waits for it (to simulate a slow request)
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
   const method = init.method ?? 'GET';
@@ -42,6 +44,10 @@ globalThis.fetch = async (url, init = {}) => {
     }));
   }
   if (u.includes('/rest/v1/watch_history') && method === 'GET') return new Response(JSON.stringify(history));
+  if (u.includes('/rest/v1/continue_watching') && method === 'GET') {
+    if (gate) await gate;
+    return new Response(JSON.stringify(continueRows));
+  }
   if (u.includes('/rest/v1/continue_watching') && method === 'POST') {
     posts.push(JSON.parse(init.body));
     return new Response(null, { status: 201 });
@@ -66,6 +72,7 @@ async function open({ season, episode, url, host = 'cinejoy.pk', mediaType = 'tv
 const reset = (rows) => {
   history = rows;
   posts = [];
+  continueRows = [];
   notifications.length = 0;
   delete local.settings;
 };
@@ -173,4 +180,75 @@ test('re-announcing the same page does not notify again', async () => {
   }
   await settle();
   assert.equal(notifications.length, 1);
+});
+
+// ── no duplicates ───────────────────────────────────────────
+test('the same episode already in Continue: nothing is written and no notification is sent', async () => {
+  reset(progress(8, 4));
+  continueRows = [{ season: 8, episode: 5 }]; // saved earlier, e.g. from another tab or before a restart
+  const tabId = await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  assert.equal(posts.length, 0);
+  assert.equal(notifications.length, 0);
+
+  // ...and the popup still says it is in Continue
+  const state = await listener({ type: 'getState', tabId }, { id: 'ext' });
+  assert.equal(state.continued, true);
+});
+
+test('opening the same episode again in a new tab does not notify again', async () => {
+  reset(progress(8, 4));
+  await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  assert.equal(notifications.length, 1);
+
+  continueRows = [{ season: 8, episode: 5 }]; // it is in the list now
+  await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' }); // a different tab
+  assert.equal(posts.length, 1);
+  assert.equal(notifications.length, 1);
+});
+
+test('a different episode of a show already in Continue replaces it and notifies', async () => {
+  reset(progress(8, 5));
+  continueRows = [{ season: 8, episode: 5 }]; // old entry
+  await open({ season: 8, episode: 6, url: 'https://cinejoy.pk/watch/tv/1622/8/6' });
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].episode, 6);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].message, 'Supernatural, S8E6');
+});
+
+// ── only shows tracked in the history ───────────────────────
+test('a show in the history but with no recorded progress is not saved', async () => {
+  reset([{ last_season: null, last_episode: null, watched_at: 't' }]);
+  await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  assert.equal(posts.length, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test('a show with a season but no episode recorded is not saved', async () => {
+  reset([{ last_season: 8, last_episode: null, watched_at: 't' }]);
+  await open({ season: 8, episode: 5, url: 'https://cinejoy.pk/watch/tv/1622/8/5' });
+  assert.equal(posts.length, 0);
+});
+
+test('the saved link is the episode that was opened, even if the tab moves on while saving', async () => {
+  reset(progress(8, 4));
+  let release;
+  gate = new Promise((resolve) => { release = resolve; });
+
+  const tabId = nextTab++;
+  const page = (episode) => ({
+    type: 'media', site: 'cinejoy', host: 'cinejoy.pk',
+    url: `https://cinejoy.pk/watch/tv/1622/8/${episode}`,
+    ref: { mediaType: 'tv', tmdbId: 1622, season: 8, episode },
+  });
+  await listener(page(5), SENDER(tabId));
+  await settle(); // saving S8E5 is now waiting on the slow lookup
+  await listener(page(6), SENDER(tabId)); // the tab moves on to S8E6 meanwhile
+  release();
+  gate = null;
+  await settle();
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].episode, 5);
+  assert.equal(posts[0].url, 'https://cinejoy.pk/watch/tv/1622/8/5'); // not the S8E6 page
 });

@@ -24,6 +24,12 @@ export async function saveContinue(ref, meta, url) {
   });
 }
 
+/** The episode currently saved for a show, or null. */
+export async function getContinue(ref) {
+  const rows = await rest(`continue_watching?media_id=eq.${ref.tmdbId}&select=season,episode&limit=1`);
+  return rows[0] ?? null;
+}
+
 export async function listContinue() {
   const rows = await rest(
     'continue_watching?select=media_id,title,poster_path,release_year,season,episode,url,updated_at&order=updated_at.desc&limit=50',

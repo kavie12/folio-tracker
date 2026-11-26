@@ -9,8 +9,9 @@ Open a movie or episode on a supported site and Folio Tracker recognises it, sho
 - Automatic tracking on supported streaming sites, one small module per site
 - Marks a title as watched at 80%, or manually from the popup
 - **Undo** for any mark
-- TV progress: the latest season and episode, never moved backwards automatically
-- Popup showing what is playing, its progress, and the list of supported sites
+- TV progress: the latest season and episode, never moved backwards automatically. Finishing a season's last episode stores just the season (`S8`), using TMDB's episode counts
+- **Continue**: the next episode of each show you follow, saved with a link, from the popup and the web app
+- Popup showing what is playing, its progress, the Continue list, and the supported sites (click one to open it)
 - Sign in with your Folio email and password; the extension keeps its own session
 - Same dark theme as the web app
 
@@ -21,7 +22,7 @@ Open a movie or episode on a supported site and Folio Tracker recognises it, sho
 | Cinecat | `cinecat.eu` | TMDB id in the URL, season and episode from the page title (`Show - S8 - E4`) |
 | Cinejoy | `cinejoy.pk` | TMDB id, season and episode in the URL (`/watch/tv/1622/8/3`) |
 
-The same list is shown in the extension's **Sites** tab.
+The same list is shown in the extension's **Sites** tab, and on the sign-in screen. Each site has an **Open** button that opens it in a new tab.
 
 ## Requirements
 
@@ -53,24 +54,48 @@ A temporary add-on is removed when Firefox closes, so repeat step 2 next session
 
 ### Install permanently
 
-Regular Firefox only keeps **signed** add-ons. Mozilla signs private ("unlisted") add-ons for free, and nothing is published.
+Regular Firefox only keeps **signed** add-ons. Mozilla signs private ("unlisted") add-ons for free, and nothing is published. `scripts/release.sh` does the whole release: it tests, bumps the version, builds, lints, signs, and commits and tags.
+
+**One-time setup**
 
 1. Create a free account at [addons.mozilla.org](https://addons.mozilla.org) and generate API keys at [addons.mozilla.org/developers/addon/api/key](https://addons.mozilla.org/developers/addon/api/key/).
-2. Add these to `.env`:
+2. Put your own add-on ID in `.env` (unique, email-style, chosen once; it can't change later):
    ```
    EXTENSION_ID=folio-tracker@yourname.dev
-   AMO_JWT_ISSUER=user:12345:67
-   AMO_JWT_SECRET=your-api-secret
    ```
-   `EXTENSION_ID` is your own unique, email-style ID. Choose it once; it can't change later.
-3. Run:
+3. Store the API key and secret in your system keyring. They are never written to the repository or `.env`:
    ```bash
-   npm run sign
+   sudo pacman -S libsecret      # provides secret-tool (KWallet and GNOME Keyring both work with it)
+   npm run release -- setup      # asks for the key, then the secret (hidden)
    ```
-   It builds, uploads, waits for Mozilla's automatic signing (usually a few minutes) and saves `artifacts/*.xpi`.
-4. In Firefox open `about:addons`, click the gear icon, choose **Install Add-on From File**, and select the `.xpi`.
 
-The extension now persists across restarts. **To update:** raise `version` in `package.json`, run `npm run sign` again and install the new `.xpi` over the old one (same ID, so your settings and sign-in are kept).
+**Every release**
+
+```bash
+npm run release                  # patch: 1.0.0 -> 1.0.1
+npm run release -- minor --install
+```
+
+| Option | Does |
+| --- | --- |
+| `patch` (default), `minor`, `major`, or `X.Y.Z` | Version to release |
+| `--dry-run` | Test, build and lint only. Signs nothing and leaves the version unchanged |
+| `--install` | Open the signed `.xpi` in Firefox (same ID, so it updates in place and keeps your sign-in) |
+| `--push` | Push the release commit and tag |
+| `--no-git` | Skip the commit and tag |
+
+Other commands: `npm run release -- status` (where credentials come from; never prints them) and `npm run release -- forget` (delete them from the keyring).
+
+**How the credentials are protected**
+
+- They live in the system keyring (encrypted at rest), or you are asked for them with hidden input. Nothing goes in `.env`, in shell history, or in the repository.
+- They are handed only to the signing command, as environment variables. They are never passed as arguments (those are visible in `ps`), and `npm test`, the build and the linter do not receive them.
+- The signing command runs with `--no-install`, so nothing new is downloaded while the secret is present.
+- The script refuses to run with uncommitted changes or if `.env` is not git-ignored.
+- In CI, set `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET` as repository secrets and the script uses them instead of the keyring.
+- If a key is ever pasted somewhere it shouldn't be, regenerate it on the same Mozilla page and run `setup` again.
+
+The extension now persists across restarts. If signing says the version already exists, run the release again (it bumps again).
 
 **Without signing:** Firefox Developer Edition, Nightly and ESR can run unsigned add-ons. Set `xpinstall.signatures.required` to `false` in `about:config`, run `npm run package`, then install `artifacts/*.zip` the same way. This does not work in regular Firefox.
 
@@ -85,30 +110,38 @@ Firefox may not give a new extension access to sites automatically. If nothing i
 3. At 80% it is added to your history and the icon badge shows ✓. You get a notification, and the popup offers **Undo**.
 4. **Mark as watched** records it immediately, or updates a show's progress to the open episode.
 
+### Season progress
+
+Progress is a season and, optionally, an episode. **A season with no episode means that season is finished.** The extension stores it that way when you finish the last episode of a season that is over (it asks TMDB how many episodes the season has), so `S8E23` becomes `S8`, and Continue then points at `S9E1`. A season counts as over if it is before the latest season, or if the show has ended. **The newest season of a show that is still airing keeps its episode number**, because TMDB may list only the episodes aired so far and the latest one would otherwise look like the finale. If TMDB's data is not available the episode number is simply kept. Rewatching an old episode never moves a finished season back.
+
 ### Continue
 
-Continue keeps one **next episode to watch** per show, with the link to open it.
+Continue keeps one **episode to continue from** per show, with a link to open it. An entry gets there in one of three ways.
 
-**How an episode gets saved.** When you open a TV episode, the extension looks at the progress recorded in Folio. If the page is the episode right after it, it is saved to Continue together with the page address:
+**1. After you finish an episode.** When a TV show's progress is updated (at 80%, or by **Mark as watched**), the extension asks TMDB whether a next episode exists:
 
-| Recorded progress | Opened | Saved? |
-| --- | --- | --- |
-| S8E4 | S8E5 | Yes |
-| S8E23 (last episode of season 8) | S9E1 | Yes |
-| S8E4 | S9E1 | No, season 8 still has episodes (season lengths come from TMDB) |
-| S8E4 | S8E7, S8E4 or S8E2 | No |
-| Show in your history, but no season and episode recorded | anything | No |
-| Show not in your history | anything | No |
+| Progress becomes | Saved to Continue |
+| --- | --- |
+| S8E4, season 8 has more episodes | S8E5 |
+| The last episode of season 8 (stored as `S8`) | S9E1, if season 9 exists |
+| The last episode of the show | nothing |
+| S8E4, and S8E5 is listed on TMDB but has not aired yet | nothing (see below) |
 
-**Only tracked shows.** A show goes to Continue only if it is in your history **with a season and episode recorded**. The database enforces this too, so no app can add anything else.
+The link is the episode's own address when the site's addresses can be built from ids (Cinejoy: `/watch/tv/{id}/{season}/{episode}`), otherwise the page you are watching. **When you open that episode, the record is updated to its real link**, silently. An entry already holding that episode keeps its link, and an entry for a different episode (for example one you added yourself) is left alone. You get one notification covering the update and the next episode.
 
-**No duplicates.** Before saving, the extension checks the Continue list itself. If that episode is already there (for example you opened it in another tab, or after restarting Firefox), nothing is written and no notification is shown. A different episode of the same show replaces the old one and does notify.
+**2. When you open the next episode.** If you open the episode right after your recorded progress (S8E5 after S8E4, or S9E1 after a finished season 8), it is saved with the page address. This covers shows whose progress was updated somewhere else, such as the web app.
 
-**How it leaves.** When your progress reaches that episode (marking it watched, here or on the website), it is removed from Continue automatically. Clearing a show's progress or removing the show from your history removes it too. Both are handled by database triggers, so they work whichever app made the change.
+**3. By hand.** On a TV episode, **Add to Continue** in the popup saves the open episode, whether or not the show is tracked in your history and whether or not it is the next one. Manual entries are kept when a show is removed from your history or its progress is cleared. They are removed when your progress reaches them.
 
-**Where you see it.** The **Continue** tab in the popup (a **Continue** button opens the saved link) and the **Continue** page of the web app, where entries can also be removed. The current episode also shows "Saved to Continue" in the popup, and a notification appears when an episode is added.
+Automatic saves only happen for shows tracked in your history (a season recorded), and the database enforces it. If an episode is already in the list nothing is written and no notification is shown, except that its link is refreshed when you open it.
 
-It is saved when the page opens, when you open the popup (this covers signing in after the page loaded), and after an undo. Turn it off with **Save to Continue** in Settings.
+**How it leaves.** When your progress reaches that episode, or finishes its season (here or on the website), it is removed. Clearing a show's progress or removing the show from your history removes automatic entries too. Database triggers do this, so it works whichever app made the change. **Undo** also puts Continue back in step: undoing S8E4 makes S8E4 the next episode again.
+
+**Where you see it.** The **Continue** tab in the popup (the **Continue** button opens the saved link) and the **Continue** page of the web app, where entries can be removed. The current episode shows "Saved to Continue" and, after a mark, "Next up, S8E5, saved to Continue".
+
+**Not aired yet.** TMDB lists upcoming episodes. The extension only saves an episode that has already aired, so an entry never links to something you can't watch yet. TMDB data is refreshed every 12 hours for shows that are still airing (3 days otherwise), so a brand new episode can take a while to appear; opening it still saves it (rule 2).
+
+Turn all of this off with **Save to Continue** in Settings.
 
 ## Undo
 
@@ -122,7 +155,8 @@ It is saved when the page opens, when you open the popup (this covers signing in
 | Setting | Default | Does |
 | --- | --- | --- |
 | Mark automatically | On | Add a title once 80% has played |
-| Notifications | On | Notify when something is added |
+| Notifications | On | Notify when a title is added to your history, progress changes, or an episode is saved to Continue |
+| Save to Continue | On | Save the next episode, and keep its link up to date |
 
 The 80% threshold and the 2-minute minimum video length are constants in `src/shared/media.js`.
 
@@ -135,7 +169,8 @@ One file per site in `src/sites/`. The build generates the content script, the m
 3. Implement `extract({ url, title, document })`. Return `null` for pages that aren't watch pages, otherwise:
    - movie: `{ mediaType: 'movie', tmdbId }`
    - TV: `{ mediaType: 'tv', tmdbId, season, episode }` (season and episode optional)
-4. Add tests to `test/sites.test.js` with real URLs and titles, then run `npm test && npm run build`.
+4. Optional: if the address of an episode can be built from its ids, add `episodeUrl` to `meta`, for example `'https://example.com/watch/tv/{tmdbId}/{season}/{episode}'` (it needs all three placeholders, https, and a host from `domains`; the build checks this). Continue then links to the next episode before you open it. Leave it out if the address contains anything else, such as a slug or other ids: Continue then uses the page you are watching until you open the episode.
+5. Add tests to `test/sites.test.js` with real URLs and titles, then run `npm test && npm run build`.
 
 ```js
 // src/sites/example.js
@@ -193,7 +228,7 @@ The two default modules ship with `frameDomains: []` because those sites' player
 | `npm run build` | Build `dist/` from `src/` and `.env` |
 | `npm run watch` | Rebuild automatically when `src/` changes |
 | `npm start` | Build and run in a separate, clean Firefox profile |
-| `npm run sign` | Build and get a signed, private `.xpi` from Mozilla |
+| `npm run release` | Test, bump, build, sign (private `.xpi` from Mozilla), commit and tag |
 | `npm run package` | Build and create an unsigned `artifacts/*.zip` |
 | `npm test` | Run the unit and DOM tests |
 | `npm run lint` | Lint `dist/` with Mozilla's validator |
@@ -206,8 +241,9 @@ The extension talks to the web app's backend directly and depends only on:
 | --- | --- |
 | `watch_history` columns `user_id, media_id, media_type, title, poster_path, release_year, last_season, last_episode, watched_at` | Reading and writing history (Row Level Security applies) |
 | Unique `(user_id, media_id, media_type)` | Idempotent inserts |
-| `continue_watching` table (migrations `005_continue_watching.sql` and `006_continue_requires_history.sql`) with unique `(user_id, media_id)`, and the triggers that guard and prune it | The Continue list |
-| Worker `GET /details/{movie\|tv}/{id}` | Title, poster and year |
+| `continue_watching` table (migrations `005`, `006` and `007_continue_manual_and_season_complete.sql`) with unique `(user_id, media_id)`, the `manual` flag, and the triggers that guard and prune it | The Continue list |
+| A progress with a season and no episode means the season is finished | Season progress, Continue clean-up |
+| Worker `GET /details/{movie\|tv}/{id}` (TMDB's details, including `seasons` and `last_episode_to_air`) | Title, poster, year, episodes per season, last aired episode |
 | Worker accepts `moz-extension://` origins | Requests from the extension |
 
 If you change one of these in the web app, change the extension in the same pull request.
@@ -224,7 +260,7 @@ folio-extension/
 │  ├─ shared/         Constants, message types, media helpers
 │  ├─ icons/          Logo (SVG and PNG)
 │  └─ manifest.base.json
-├─ scripts/           build.mjs (esbuild + manifest), sign.mjs, env.mjs
+├─ scripts/           build.mjs (esbuild + manifest), release.sh (signing), env.mjs
 └─ test/              Site modules, helpers, Folio calls, undo, tracker and popup
 ```
 
@@ -237,4 +273,6 @@ For a public listing, upload the output of `npm run package` at [addons.mozilla.
 - Detection depends on each site's URL and title format. If a site changes them, update its module.
 - Playback can only be followed on domains the extension runs on (see above).
 - Automatic progress only moves forward; setting an earlier episode by hand from the popup does lower it.
+- Knowing whether a next episode exists depends on TMDB's data. For shows still airing it can lag behind by up to a day (the Worker caches it for 24 hours).
+- If a site can't build episode links, a freshly saved next episode points at the page you were watching until you open it.
 - Firefox only (Manifest V3, Firefox 128+).

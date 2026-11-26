@@ -8,6 +8,7 @@ export const MSG = {
   MARK: 'markWatched',
   UNDO: 'undoMark',
   LIST_CONTINUE: 'listContinue',
+  ADD_CONTINUE: 'addContinue',
   SIGN_IN: 'signIn',
   SIGN_OUT: 'signOut',
   SET_SETTINGS: 'setSettings',

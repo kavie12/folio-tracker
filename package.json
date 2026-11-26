@@ -1,15 +1,17 @@
 {
   "name": "folio-tracker",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "private": true,
   "description": "Firefox extension that automatically logs what you watch to Folio",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "watch": "node --watch-path=src scripts/build.mjs",
     "start": "npm run build && web-ext run --source-dir dist",
-    "lint": "web-ext lint --source-dir dist",
     "package": "npm run build && web-ext build --source-dir dist --artifacts-dir artifacts --overwrite-dest",
-    "test": "node --test"
+    "lint": "web-ext lint --source-dir dist",
+    "test": "node --test",
+    "release": "bash scripts/release.sh"
   },
   "devDependencies": {
     "@fontsource/bricolage-grotesque": "^5.1.0",

@@ -6,25 +6,13 @@ import { build } from 'esbuild';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import { loadEnv, root } from './env.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (...p) => path.join(root, 'src', ...p);
 const dist = (...p) => path.join(root, 'dist', ...p);
 
 // ── environment ─────────────────────────────────────────────
-async function loadEnv() {
-  const env = { ...process.env };
-  const file = path.join(root, '.env');
-  if (existsSync(file)) {
-    for (const line of (await readFile(file, 'utf8')).split(/\r?\n/)) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-      if (m && !line.trim().startsWith('#') && env[m[1]] === undefined) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-    }
-  }
-  return env;
-}
-
 const env = await loadEnv();
 const missing = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'TMDB_PROXY_URL', 'FOLIO_APP_URL'].filter((k) => !env[k]);
 if (missing.length) {
@@ -59,7 +47,22 @@ for (const file of files) {
   if (!domains.length) fail('meta.domains needs at least one hostname.');
   for (const d of [...domains, ...frameDomains]) if (!HOST.test(d)) fail(`"${d}" is not a bare hostname (no scheme, path or wildcard).`);
 
-  sites.push({ id, name: meta.name, domains, frameDomains });
+  if (meta.episodeUrl !== undefined) {
+    const tpl = String(meta.episodeUrl);
+    for (const placeholder of ['{tmdbId}', '{season}', '{episode}']) {
+      if (!tpl.includes(placeholder)) fail(`meta.episodeUrl must contain ${placeholder}.`);
+    }
+    let url;
+    try {
+      url = new URL(tpl.replaceAll('{tmdbId}', '1').replaceAll('{season}', '1').replaceAll('{episode}', '1'));
+    } catch {
+      fail('meta.episodeUrl is not a valid URL.');
+    }
+    if (url.protocol !== 'https:') fail('meta.episodeUrl must use https.');
+    if (!domains.some((d) => url.hostname === d || url.hostname.endsWith(`.${d}`))) fail('meta.episodeUrl must be on one of meta.domains.');
+  }
+
+  sites.push({ id, name: meta.name, domains, frameDomains, ...(meta.episodeUrl ? { episodeUrl: meta.episodeUrl } : {}) });
 }
 if (!sites.length) { console.error('No site modules found in src/sites.'); process.exit(1); }
 

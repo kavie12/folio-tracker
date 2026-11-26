@@ -15,7 +15,7 @@ const SITES = [
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 /** Opens the popup against a fake background that answers GET_STATE with `state`. */
-async function open(state, tabUrl = 'https://cinejoy.pk/watch/tv/1622/8/4', continueItems = []) {
+async function open(state, tabUrl = 'https://cinejoy.pk/watch/tv/1622/8/4', continueItems = [], responses = {}) {
   const dom = new JSDOM('<!doctype html><body><div id="app"></div></body>');
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
   dom.window.close = () => {};
@@ -29,6 +29,7 @@ async function open(state, tabUrl = 'https://cinejoy.pk/watch/tv/1622/8/4', cont
         sent.push(m);
         if (m.type === MSG.GET_STATE) return state;
         if (m.type === MSG.LIST_CONTINUE) return { ok: true, items: continueItems };
+        if (responses[m.type]) return responses[m.type](m);
         return { ok: true };
       },
     },
@@ -49,7 +50,7 @@ const tvState = (extra = {}) => ({
   meta: { title: 'Supernatural', posterPath: '/p.jpg', releaseYear: 2005 },
   entry: { watched: false, progress: null },
   video: { percent: 42, ratio: 0.42, paused: false, ended: false, playing: true },
-  done: false, autoMarked: false, undoable: false, undone: false, continued: false, lastError: null, ...extra,
+  done: false, autoMarked: false, undoable: false, undone: false, continued: false, canAddContinue: false, nextSaved: null, lastError: null, ...extra,
 });
 
 test('signed out: shows the sign-in form and the supported sites', async (t) => {
@@ -172,4 +173,70 @@ test('the current page says when it was saved to Continue', async (t) => {
   t.after(() => mock.timers.reset());
   const { doc } = await open(tvState({ continued: true }));
   assert.match(doc.body.textContent, /Saved to Continue/);
+});
+
+// ── Sites: open the streaming sites ─────────────────────────
+test('every row in the Sites tab is a link that opens the site in a new tab', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc, opened } = await open(tvState());
+  tab(doc, 'Sites').click();
+  await settle();
+
+  const rows = [...doc.querySelectorAll('a.site')];
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].getAttribute('href'), 'https://cinecat.eu');
+  assert.equal(rows[0].getAttribute('aria-label'), 'Open Cinecat (cinecat.eu)');
+  assert.match(rows[1].textContent, /Open/);
+
+  rows[0].click();
+  rows[1].click();
+  assert.deepEqual(opened, ['https://cinecat.eu', 'https://cinejoy.pk']);
+});
+
+test('the sites listed on the sign-in screen open too', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc, opened } = await open({ signedIn: false, settings }, 'https://example.com/');
+  doc.querySelector('a.site').click();
+  assert.deepEqual(opened, ['https://cinecat.eu']);
+});
+
+// ── Add to Continue ─────────────────────────────────────────
+test('Add to Continue appears for an episode that is not in the list, and asks the background to save it', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc, sent } = await open(tvState({ canAddContinue: true, entry: { watched: false, progress: null } }));
+  const button = [...doc.querySelectorAll('.btn')].find((b) => b.textContent === 'Add to Continue');
+  assert.ok(button);
+  button.click();
+  await settle();
+  assert.ok(sent.some((m) => m.type === MSG.ADD_CONTINUE && m.tabId === 7));
+});
+
+test('Add to Continue shows why it failed', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc } = await open(tvState({ canAddContinue: true }), undefined, [], {
+    [MSG.ADD_CONTINUE]: () => ({ ok: false, error: 'Continue needs the latest database update (migration 007).' }),
+  });
+  [...doc.querySelectorAll('.btn')].find((b) => b.textContent === 'Add to Continue').click();
+  await settle();
+  assert.match(doc.querySelector('[role=alert]').textContent, /migration 007/);
+});
+
+test('Add to Continue is hidden when it is not offered', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc } = await open(tvState({ canAddContinue: false, continued: true }));
+  assert.equal([...doc.querySelectorAll('.btn')].some((b) => b.textContent === 'Add to Continue'), false);
+  assert.match(doc.body.textContent, /Saved to Continue/);
+});
+
+// ── next up ─────────────────────────────────────────────────
+test('after marking, the popup says which next episode was saved', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc } = await open(tvState({ done: true, autoMarked: true, nextSaved: { season: 8, episode: 5 }, entry: { watched: true, progress: { season: 8, episode: 4 } } }));
+  assert.match(doc.body.textContent, /Next up, S8E5, saved to Continue/);
+});
+
+test('no next-up line when nothing follows', async (t) => {
+  t.after(() => mock.timers.reset());
+  const { doc } = await open(tvState({ done: true, nextSaved: null, entry: { watched: true, progress: { season: 9, episode: null } } }));
+  assert.doesNotMatch(doc.body.textContent, /Next up/);
 });

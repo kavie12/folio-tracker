@@ -2,8 +2,11 @@
 import { getSession, NotSignedInError } from './auth.js';
 import { rest } from './folio.js';
 
-/** Saves (or replaces) the next episode for a show. One row per show. */
-export async function saveContinue(ref, meta, url) {
+/**
+ * Saves (or replaces) the episode to continue from for a show. One row per show.
+ * `manual` marks an entry the user added themselves, which is allowed for shows not tracked in the history.
+ */
+export async function saveContinue(ref, meta, url, { manual = false } = {}) {
   const session = await getSession();
   if (!session) throw new NotSignedInError();
 
@@ -20,14 +23,24 @@ export async function saveContinue(ref, meta, url) {
       episode: ref.episode,
       url,
       updated_at: new Date().toISOString(),
+      ...(manual ? { manual: true } : {}), // left out otherwise, so automatic saves work before the migration is applied
     },
   });
 }
 
-/** The episode currently saved for a show, or null. */
+/** The episode currently saved for a show (with its link), or null. */
 export async function getContinue(ref) {
-  const rows = await rest(`continue_watching?media_id=eq.${ref.tmdbId}&select=season,episode&limit=1`);
+  const rows = await rest(`continue_watching?media_id=eq.${ref.tmdbId}&select=season,episode,url&limit=1`);
   return rows[0] ?? null;
+}
+
+/** Points the saved episode at a (better) link, for example the real page once the user opens it. */
+export async function updateContinueLink(ref, url) {
+  await rest(`continue_watching?media_id=eq.${ref.tmdbId}&season=eq.${ref.season}&episode=eq.${ref.episode}`, {
+    method: 'PATCH',
+    prefer: 'return=minimal',
+    body: { url, updated_at: new Date().toISOString() },
+  });
 }
 
 export async function listContinue() {

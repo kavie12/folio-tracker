@@ -90,16 +90,26 @@ function Poster(meta) {
   return box;
 }
 
+/** Each row is a link: clicking anywhere on it opens the site in a new tab. */
 function SiteList(highlightHost) {
   return el('ul', { class: 'list' },
     sites.map((s) => {
+      const url = `https://${s.domains[0]}`;
       const here = highlightHost && s.domains.some((d) => highlightHost === d || highlightHost.endsWith(`.${d}`));
-      return el('li', { class: `site${here ? ' here' : ''}` },
-        el('div', {},
-          el('div', { class: 'display' }, s.name),
-          s.domains.map((d) => el('a', { href: `https://${d}`, onclick: (e) => { e.preventDefault(); openLink(`https://${d}`); } }, d)),
+      return el('li', {},
+        el('a', {
+          class: `site${here ? ' here' : ''}`,
+          href: url,
+          'aria-label': `Open ${s.name} (${s.domains[0]})`,
+          onclick: (e) => { e.preventDefault(); openLink(url); },
+        },
+          el('div', { class: 'site-info' },
+            el('div', { class: 'display' }, s.name),
+            el('div', { class: 'small muted' }, s.domains.join(', ')),
+          ),
+          here && el('span', { class: 'tag' }, 'This tab'),
+          el('span', { class: 'open', 'aria-hidden': 'true' }, 'Open ↗'),
         ),
-        here && el('span', { class: 'tag' }, 'This tab'),
       );
     }),
   );
@@ -164,7 +174,7 @@ function NowPlaying() {
     );
   }
 
-  const { media, meta, entry, video, done, autoMarked, undoable, undone, continued, lastError, settings } = s;
+  const { media, meta, entry, video, done, autoMarked, undoable, undone, continued, canAddContinue, nextSaved, lastError, settings } = s;
   const label = progressLabel(media);
   const title = meta?.title ?? `TMDB #${media.tmdbId}`;
 
@@ -220,7 +230,22 @@ function NowPlaying() {
       ),
     ),
     button,
+    canAddContinue && el('button', {
+      class: 'btn btn-ghost',
+      title: 'Save this episode so you can pick up here later',
+      onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        e.currentTarget.textContent = 'Adding';
+        actionError = null;
+        const res = await send({ type: MSG.ADD_CONTINUE, tabId: tab.id });
+        if (!res.ok) actionError = res.error;
+        await refresh();
+        renderPanel();
+      },
+    }, 'Add to Continue'),
     continued && el('p', { class: 'small muted', style: 'text-align:center' }, el('span', { class: 'accent' }, '✓ '), 'Saved to Continue'),
+    done && nextSaved && el('p', { class: 'small muted', style: 'text-align:center' },
+      el('span', { class: 'accent' }, '✓ '), `Next up, S${nextSaved.season}E${nextSaved.episode}, saved to Continue`),
     actionError && el('p', { class: 'small danger', role: 'alert' }, actionError),
     !actionError && lastError && el('p', { class: 'small danger', role: 'alert' }, `${lastError} It will retry automatically.`),
     !done && undone && el('p', { class: 'small muted', style: 'text-align:center' },
@@ -301,7 +326,7 @@ function Settings() {
     el('div', { class: 'card', style: 'display:flex;flex-direction:column;gap:14px' },
       toggle('autoMark', 'Mark automatically', 'Add a title once 80% has played.'),
       toggle('notify', 'Notifications', 'Tell me when something is added.'),
-      toggle('saveContinue', 'Save to Continue', 'Remember the next episode when I open it.'),
+      toggle('saveContinue', 'Save to Continue', 'Save the next episode, and keep its link up to date.'),
     ),
     el('div', { class: 'card', style: 'display:flex;flex-direction:column;gap:10px' },
       el('div', {}, el('div', { class: 'small muted' }, 'Signed in as'), el('div', { style: 'font-weight:600;word-break:break-all' }, user.email)),

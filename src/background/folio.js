@@ -3,7 +3,7 @@
  * Row Level Security scopes every call to the signed-in user.
  */
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../shared/config.js';
-import { isAhead } from '../shared/media.js';
+import { isAhead, normalizeProgress, progressMatches } from '../shared/media.js';
 import { getAccessToken, getSession, NotSignedInError } from './auth.js';
 import { getDetails } from './tmdb.js';
 
@@ -32,7 +32,13 @@ export async function rest(path, { method = 'GET', body, prefer } = {}, retry = 
     if (await getAccessToken({ force: true })) return rest(path, { method, body, prefer }, false);
     throw new NotSignedInError();
   }
-  if (!res.ok) throw new Error('Folio couldn’t save that. Try again in a moment.');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const error = new Error('Folio couldn’t save that. Try again in a moment.');
+    error.status = res.status;
+    error.detail = String(body?.message ?? ''); // for example "Could not find the 'manual' column ..."
+    throw error;
+  }
   return method === 'GET' ? res.json() : null;
 }
 
@@ -46,18 +52,16 @@ export async function fetchEntry(ref) {
   return { watched: true, progress: season == null ? null : { season, episode }, watchedAt };
 }
 
-/** Does the recorded progress point at exactly this season and episode? */
-const progressMatches = (progress, ref) =>
-  progress?.season === ref.season && (progress?.episode ?? null) === (ref.episode ?? null);
-
 /**
  * Can this undo record still be applied? For TV it must not have been overtaken:
  * undoing S8E4 after S8E5 was recorded would otherwise wipe out later progress.
  */
 export function undoApplies(ref, entry, undo) {
   if (!undo || !entry?.watched) return false;
-  if (ref.mediaType === 'tv' && ref.season != null) return progressMatches(entry.progress, ref);
-  return true;
+  // `written` is the progress the mark stored (a finished season is stored without its episode). Records
+  // made before it existed fall back to the episode itself.
+  const written = undo.written ?? (ref.mediaType === 'tv' && ref.season != null ? { season: ref.season, episode: ref.episode ?? null } : null);
+  return written ? progressMatches(entry.progress, written) : true;
 }
 
 /**
@@ -65,8 +69,9 @@ export function undoApplies(ref, entry, undo) {
  *  - new title: added (with progress for TV)
  *  - already in history, TV: progress moves forward only, unless `manual` (the user asked for it)
  *  - already in history, movie: nothing to do
- * `undo` describes how to reverse what was written (null when nothing was written).
- * @returns {Promise<{ added: boolean, progressUpdated: boolean, undo: object|null }>}
+ * The last episode of a season is stored as just the season (the season is finished), using TMDB's
+ * episode counts. `undo` describes how to reverse what was written (null when nothing was written).
+ * @returns {Promise<{ added: boolean, progressUpdated: boolean, progress: object|null, undo: object|null }>}
  */
 export async function recordWatch(ref, { manual = false } = {}) {
   const session = await getSession();
@@ -75,8 +80,12 @@ export async function recordWatch(ref, { manual = false } = {}) {
   const hasProgress = ref.mediaType === 'tv' && ref.season != null;
   const existing = await fetchEntry(ref);
 
+  const details = hasProgress ? await getDetails(ref).catch(() => null) : null;
+  const counts = details?.episodeCounts;
+  const progress = hasProgress ? normalizeProgress(ref, counts, details?.finishedSeasons) : null; // what will be stored
+
   if (!existing.watched) {
-    const meta = await getDetails(ref);
+    const meta = details ?? (await getDetails(ref)); // a new row needs the title, so this one may throw
     await rest('watch_history?on_conflict=user_id,media_id,media_type', {
       method: 'POST',
       prefer: 'resolution=ignore-duplicates,return=minimal',
@@ -87,24 +96,27 @@ export async function recordWatch(ref, { manual = false } = {}) {
         title: meta.title,
         poster_path: meta.posterPath,
         release_year: meta.releaseYear,
-        ...(hasProgress ? { last_season: ref.season, last_episode: ref.episode ?? null } : {}),
+        ...(progress ? { last_season: progress.season, last_episode: progress.episode } : {}),
       },
     });
-    return { added: true, progressUpdated: hasProgress, undo: { type: 'delete' } };
+    return { added: true, progressUpdated: hasProgress, progress, undo: { type: 'delete', written: progress } };
   }
 
-  if (hasProgress && (manual || isAhead(ref, existing.progress))) {
-    if (!progressMatches(existing.progress, ref)) {
-      await rest(`watch_history?${filter(ref)}`, {
-        method: 'PATCH',
-        prefer: 'return=minimal',
-        // Bump watched_at so the show moves to the top of "recently watched".
-        body: { last_season: ref.season, last_episode: ref.episode ?? null, watched_at: new Date().toISOString() },
-      });
-      return { added: false, progressUpdated: true, undo: { type: 'restore', progress: existing.progress, watchedAt: existing.watchedAt } };
-    }
+  if (progress && (manual || isAhead(progress, existing.progress, counts)) && !progressMatches(existing.progress, progress)) {
+    await rest(`watch_history?${filter(ref)}`, {
+      method: 'PATCH',
+      prefer: 'return=minimal',
+      // Bump watched_at so the show moves to the top of "recently watched".
+      body: { last_season: progress.season, last_episode: progress.episode, watched_at: new Date().toISOString() },
+    });
+    return {
+      added: false,
+      progressUpdated: true,
+      progress,
+      undo: { type: 'restore', progress: existing.progress, watchedAt: existing.watchedAt, written: progress },
+    };
   }
-  return { added: false, progressUpdated: false, undo: null };
+  return { added: false, progressUpdated: false, progress: null, undo: null };
 }
 
 /** Reverses a mark: removes a title that was added, or restores the previous progress. */

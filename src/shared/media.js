@@ -37,32 +37,95 @@ export function progressLabel(ref) {
   return `S${ref.season}${ref.episode != null ? `E${ref.episode}` : ''}`;
 }
 
+/**
+ * Where a progress stands inside its season. A progress with a season but no episode means that
+ * season is FINISHED (it is what we store after a season's last episode), so it sits at the season's end.
+ */
+const endOf = (progress, episodeCounts) => progress.episode ?? episodeCounts?.[progress.season] ?? Infinity;
+
 /** True when `next` is later in the show than `current` (or there is no current progress). */
-export function isAhead(next, current) {
+export function isAhead(next, current, episodeCounts) {
   if (next.season == null) return false;
   if (!current || current.season == null) return true;
   if (next.season !== current.season) return next.season > current.season;
-  return (next.episode ?? 0) > (current.episode ?? 0);
+  return endOf(next, episodeCounts) > endOf(current, episodeCounts);
+}
+
+/** Does the recorded progress stand at exactly this season and episode? */
+export const progressMatches = (progress, target) =>
+  progress?.season === target.season && (progress?.episode ?? null) === (target.episode ?? null);
+
+/**
+ * Is `ref` the last episode of a season that is over, according to TMDB? Both must hold: the episode reaches the
+ * season's episode count, and the season is in `finishedSeasons`. The second part matters for a show that is
+ * still airing, where the newest episode can equal TMDB's count without being the season's end.
+ */
+export function isLastEpisode(ref, episodeCounts, finishedSeasons) {
+  const count = episodeCounts?.[ref.season];
+  return (
+    ref.mediaType === 'tv' && ref.season != null && ref.episode != null && count != null &&
+    ref.episode >= count && !!finishedSeasons?.includes(ref.season)
+  );
 }
 
 /**
- * Is `candidate` the episode right after `progress`?  Same season and the next episode number, or
- * episode 1 of the next season once the current season is finished. `episodeCounts` (season -> number
- * of episodes, from TMDB) tells us when a season is finished; without it we accept S+1 E1.
+ * The progress to store for `ref`. Finishing a season's last episode stores just the season, because the
+ * season is done and the next thing to watch is episode 1 of the next one. If TMDB's data is not
+ * available, or the season may still be airing, the episode is kept as it is.
+ */
+export function normalizeProgress(ref, episodeCounts, finishedSeasons) {
+  return { season: ref.season, episode: isLastEpisode(ref, episodeCounts, finishedSeasons) ? null : (ref.episode ?? null) };
+}
+
+/**
+ * Is `candidate` the episode right after `progress`?
+ *  - progress S8E4:  S8E5 is next. S9E1 is next only once season 8 is finished (TMDB's episode count).
+ *  - progress S8 (season finished, no episode): S9E1 is next.
+ * Without TMDB's counts, S+1 E1 is accepted after any episode.
  */
 export function isNextEpisode(candidate, progress, episodeCounts) {
-  if (!progress || progress.season == null || progress.episode == null) return false;
+  if (!progress || progress.season == null) return false;
   if (candidate.season == null || candidate.episode == null) return false;
 
-  if (candidate.season === progress.season) return candidate.episode === progress.episode + 1;
-  if (candidate.season === progress.season + 1 && candidate.episode === 1) {
-    const count = episodeCounts?.[progress.season];
-    return count == null || progress.episode >= count;
+  const count = episodeCounts?.[progress.season];
+  const startsNextSeason = candidate.season === progress.season + 1 && candidate.episode === 1;
+
+  if (progress.episode == null) {
+    // The season is finished. Normally next is S+1 E1; an episode beyond TMDB's count means the count was outdated.
+    return startsNextSeason || (count != null && candidate.season === progress.season && candidate.episode === count + 1);
   }
-  return false;
+  if (candidate.season === progress.season) return candidate.episode === progress.episode + 1;
+  return startsNextSeason && (count == null || progress.episode >= count);
 }
 
 /** Should opening `ref` put it in Continue? Only the episode right after recorded progress qualifies. */
 export function qualifiesForContinue(ref, entry, episodeCounts) {
   return ref.mediaType === 'tv' && !!entry?.watched && isNextEpisode(ref, entry.progress, episodeCounts);
+}
+
+/**
+ * The episode after `progress`, if TMDB says one exists and it has aired. Returns { season, episode } or null.
+ *  - S8E4 -> S8E5 when season 8 has more than 4 episodes
+ *  - the last episode of a season, or a finished season (S8, no episode) -> S9E1 when season 9 exists
+ *  - null when the show has ended, TMDB has no counts, or the next episode has not aired yet
+ * @param {{season:number, episode:number|null}} progress
+ * @param {Object<number, number>} episodeCounts season -> number of episodes
+ * @param {{season:number, episode:number}|null} [lastAired] the latest aired episode
+ */
+export function nextEpisodeAfter(progress, episodeCounts, lastAired) {
+  if (!progress || progress.season == null || !episodeCounts) return null;
+
+  const count = episodeCounts[progress.season];
+  let next = null;
+  if (progress.episode != null && count != null && progress.episode < count) {
+    next = { season: progress.season, episode: progress.episode + 1 };
+  } else if ((progress.episode == null || (count != null && progress.episode >= count)) && episodeCounts[progress.season + 1] != null) {
+    next = { season: progress.season + 1, episode: 1 };
+  }
+  if (!next) return null;
+
+  if (lastAired && (next.season > lastAired.season || (next.season === lastAired.season && next.episode > lastAired.episode))) {
+    return null; // listed on TMDB but not aired yet: there is nothing to watch, and no link that works
+  }
+  return next;
 }

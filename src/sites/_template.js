@@ -7,6 +7,9 @@ export const meta = {
   name: 'Example', // shown in the extension's Sites list
   domains: ['example.com'], // bare hostnames; subdomains are included automatically
   frameDomains: [], // optional: hosts of embedded video players (cross-origin iframes)
+  // optional: if the address of an episode can be built from its ids, say how. Continue then links to the
+  // next episode before it is opened. Leave it out if the address has anything else in it (a slug, other ids).
+  // episodeUrl: 'https://example.com/watch/tv/{tmdbId}/{season}/{episode}',
 };
 
 /**

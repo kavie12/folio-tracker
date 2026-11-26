@@ -8,6 +8,8 @@ export const meta = {
   name: 'Cinejoy',
   domains: ['cinejoy.pk'],
   frameDomains: [],
+  // The address of any episode can be built from its ids, so Continue can link to an episode before it is opened.
+  episodeUrl: 'https://cinejoy.pk/watch/tv/{tmdbId}/{season}/{episode}',
 };
 
 /** @param {{ url: URL, title: string, document: Document }} page @returns {import('../shared/media.js').MediaRef | null} */
